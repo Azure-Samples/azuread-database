@@ -1,0 +1,26 @@
+RESOURCE_GROUP=demo-azuread-database-rg
+DB_SERVER_NAME=mysql-demo-azuread
+LOCATION=eastus
+ADMIN_USERNAME=adminsql
+ADMIN_PASSWORD=P@ssw0rd
+# create resource group
+az group create --name $RESOURCE_GROUP --location $LOCATION
+
+az mysql server create -g $RESOURCE_GROUP -n $DB_SERVER_NAME --location $LOCATION --admin-user $ADMIN_USERNAME --admin-password $ADMIN_PASSWORD --ssl-enforcement Enabled
+DB_SERVER_FQDN=$(az mysql server show --resource-group $RESOURCE_GROUP --name $DB_SERVER_NAME --output tsv --query fullyQualifiedDomainName)
+
+# retrieve current user object id, to be assigned as AD admin.
+CURRENTUSER_OID=$(az ad signed-in-user show -o tsv --query objectId)
+CURRENTUSER_DISPLAYNAME=$(az ad signed-in-user show -o tsv --query userPrincipalName)
+
+DB_SERVER_USERNAME=$CURRENTUSER_DISPLAYNAME$DB_SERVER_NAME
+# create AD admin user
+az mysql server ad-admin create --resource-group $RESOURCE_GROUP --server-name $DB_SERVER_NAME --display-name $CURRENTUSER_DISPLAYNAME --object-id $CURRENTUSER_OID
+
+#create a firewall rule to allow access from current computer
+# get current IP
+CURRENT_IP=$(curl http://whatismyip.akamai.com)
+az mysql server firewall-rule create -g $RESOURCE_GROUP -n AllowCurrentIP --server $DB_SERVER_NAME --start-ip-address $CURRENT_IP --end-ip-address $CURRENT_IP
+
+DB_SERVER_USERNAME=$CURRENTUSER_DISPLAYNAME@$DB_SERVER_NAME
+mysql -h $DB_SERVER_FQDN --user $DB_SERVER_USERNAME --enable-cleartext-plugin --password=`az account get-access-token --resource-type oss-rdbms --output tsv --query accessToken`
